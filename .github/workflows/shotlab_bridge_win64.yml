@@ -1,0 +1,106 @@
+name: ShotLab Bridge - Chiaki-ng Windows x64 (Portable Test)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shotlab-bridge-win64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Git Text-Einstellungen
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - name: Chiaki-ng aus eigenem Fork auschecken
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: MSYS2 und Build-Abhaengigkeiten
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: git diffutils
+          pacboy: >-
+            ca-certificates:p
+            cc:p
+            cmake:p
+            curl:p
+            fast_float:p
+            fftw:p
+            json-c:p
+            libevent:p
+            lcms2:p
+            libdovi:p
+            meson:p
+            miniupnpc:p
+            gcc:p
+            nasm:p
+            ninja:p
+            openssl:p
+            opus:p
+            pkgconf:p
+            protobuf:p
+            python:p
+            python-psutil:p
+            python-glad:p
+            python-jinja:p
+            python-pip:p
+            qt6-base:p
+            qt6-declarative:p
+            qt6-svg:p
+            shaderc:p
+            speexdsp:p
+            spirv-cross:p
+            vulkan:p
+            vulkan-headers:p
+      - name: Python protobuf und Tools
+        run: |
+          pip install protobuf
+          pacman -S git make unzip zip --noconfirm
+      - name: libplacebo bauen (Chiaki Originalskript)
+        env:
+          LIBPLACEBO_VERSION: 3be579e6c7f6b421d9ac3ab4860edc437c50b3eb
+        run: |
+          scripts/build-libplacebo-windows.sh
+      - name: Offizielle FFmpeg Windows Binaries einrichten
+        run: |
+          curl -fL -o ffmpeg-build.zip https://github.com/streetpea/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip
+          unzip -q ffmpeg-build.zip
+          cp -a "ffmpeg-n9.0-latest-win64-gpl-shared-9.0/bin/." /mingw64/bin
+          cp -a "ffmpeg-n9.0-latest-win64-gpl-shared-9.0/include/." /mingw64/include
+          cp -a "ffmpeg-n9.0-latest-win64-gpl-shared-9.0/lib/." /mingw64/lib
+      - name: SDL2 Compat und HIDAPI bauen (Chiaki Originalskripte)
+        run: |
+          INSTALL_PREFIX=/mingw64 scripts/build-sdl2-compat.sh .
+          INSTALL_PREFIX=/mingw64 scripts/build-hidapi.sh .
+          cp /mingw64/lib/pkgconfig/sdl2-compat.pc /mingw64/lib/pkgconfig/sdl2.pc
+      - name: ShotLab Bridge nur in Quellcode einbauen
+        run: |
+          python shotlab/patch_chiaki.py .
+      - name: CMake konfigurieren
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHIAKI_ENABLE_CLI=OFF
+      - name: Separate Chiaki Bridge EXE erstellen
+        run: |
+          cmake --build build --config Release --target chiaki
+      - name: Portable Windows Testpaket bauen
+        run: |
+          ./scripts/deploy-windows-msys2.sh chiaki-ng-ShotLab-Test build/gui/chiaki.exe "${{ github.workspace }}/build/third-party/cpp-steam-tools" /mingw64 gui/src/qml
+          cat > chiaki-ng-ShotLab-Test/Start_ShotLab_Chiaki_Bridge.cmd <<'EOF'
+          @echo off
+          set "SHOTLAB_FRAME_BRIDGE=1"
+          start "" "%~dp0chiaki.exe"
+          EOF
+          printf 'PROTOTYP: Exporte nur nach 127.0.0.1:38517. Nicht ueber vorhandene Chiaki-Installation kopieren.\n' > chiaki-ng-ShotLab-Test/TESTVERSION.txt
+      - name: Testversion zum Herunterladen bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: chiaki-ng-ShotLab-Bridge-Windows-x64-TEST
+          path: chiaki-ng-ShotLab-Test/
+          if-no-files-found: error
+          retention-days: 7
